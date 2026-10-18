@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>KOS Review Pack</title>
+<style>
+  :root { --navy: #1f3a5f; --ink: #18202b; --muted: #5a6573; --line: #dde2e9; --bg: #f6f7f9; --red: #a1261f; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.5 "Segoe UI", -apple-system, Helvetica, Arial, sans-serif; }
+  #gate { min-height: 100%; display: grid; place-items: center; padding: 24px 16px; }
+  .box { width: 100%; max-width: 380px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px; }
+  .kicker { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: 26px; margin: 8px 0 6px; color: var(--navy); }
+  p { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+  label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  input { width: 100%; font: inherit; padding: 11px 12px; border: 1px solid #c3ccd8; border-radius: 8px; }
+  input:focus { outline: 2px solid var(--navy); outline-offset: 1px; }
+  button.go { width: 100%; margin-top: 14px; font: 600 16px/1 inherit; padding: 13px; border: 0; border-radius: 8px; background: var(--navy); color: #fff; cursor: pointer; }
+  button.go:disabled { opacity: .6; cursor: wait; }
+  #msg { min-height: 1.5em; margin: 12px 0 0; font-size: 14px; color: var(--red); }
+  .small { font-size: 12.5px; margin: 18px 0 0; }
+  #app { height: 100%; display: flex; flex-direction: column; }
+  #bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--navy); }
+  #bar button { font: 600 14px/1 inherit; color: #fff; background: rgba(255,255,255,.14); border: 0; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+  #view { flex: 1; width: 100%; border: 0; background: #fff; }
+</style>
+</head>
+<body>
+<div id="gate">
+  <form class="box" id="form">
+    <div class="kicker">Private · draft for internal review</div>
+    <h1>KOS Review Pack</h1>
+    <p>Enter the password you were given. Everything on this page is encrypted and opens only in your browser.</p>
+    <label for="pw">Password</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <button class="go" id="unlock" type="submit">Unlock</button>
+    <div id="msg" role="alert"></div>
+    <p class="small">Works on phones and laptops. Videos have sound.</p>
+  </form>
+</div>
+<div id="app" hidden>
+  <div id="bar" hidden><button id="home" type="button">← Back to the review pack</button></div>
+  <iframe id="view" title="KOS review pack"></iframe>
+</div>
+<script>
+const SALT = "6LeJsp+aGKzb+w9ZV6eEIQ==", ITER = 600000;
+const $ = (id) => document.getElementById(id);
+let key = null, current = "index.html", sizes = {};
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+async function derive(pw) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(SALT), iterations: ITER, hash: "SHA-256" },
+                                 base, { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
+}
+async function fid(path) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path)));
+  return [...h].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 20);
+}
+async function load(path) {
+  const r = await fetch("enc/" + await fid(path));
+  if (!r.ok) throw new Error("Not found: " + path);
+  const buf = new Uint8Array(await r.arrayBuffer());
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: buf.slice(0, 12) }, key, buf.slice(12));
+}
+const resolve = (href) => { const u = new URL(href, "https://kos/" + current); return [decodeURIComponent(u.pathname.slice(1)), u.hash.slice(1)]; };
+
+async function show(path, push = true, hash = "") {
+  const html = new TextDecoder().decode(await load(path));
+  current = path;
+  $("bar").hidden = path === "index.html";
+  if (push) history.pushState({ path }, "", "#" + encodeURIComponent(path));
+  const view = $("view");
+  view.onload = () => wire(view.contentDocument, hash);
+  view.srcdoc = html;
+}
+
+async function openFile(path, type) {
+  const w = window.open("", "_blank");
+  const url = URL.createObjectURL(new Blob([await load(path)], { type }));
+  if (w) w.location = url; else location.href = url;
+}
+
+function wire(doc, hash) {
+  if (hash) doc.getElementById(hash)?.scrollIntoView();
+  doc.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a) return;
+    const href = a.getAttribute("href");
+    e.preventDefault();
+    if (/^(https?:|mailto:|tel:)/.test(href)) { window.open(href, "_blank", "noopener"); return; }
+    if (href.startsWith("#")) { doc.getElementById(href.slice(1))?.scrollIntoView({ behavior: "smooth" }); return; }
+    const [path, h] = resolve(href);
+    if (path.endsWith(".html")) show(path, true, h);
+    else if (path.endsWith(".pdf")) openFile(path, "application/pdf");
+  });
+  doc.querySelectorAll("video[data-enc]").forEach((v) => {
+    const [path] = resolve(v.dataset.enc);
+    const mb = sizes[path] ? ` (${(sizes[path] / 1e6).toFixed(1)} MB)` : "";
+    const btn = doc.createElement("button");
+    btn.type = "button";
+    btn.textContent = "▶ Play video" + mb;
+    btn.style.cssText = "display:block;margin:0 0 10px;font:600 15px/1 sans-serif;padding:12px 16px;border:0;border-radius:8px;background:#1f3a5f;color:#fff;cursor:pointer";
+    let busy = false;
+    const start = async () => {
+      if (v.src || busy) return;
+      busy = true;
+      btn.textContent = "Unlocking video…";
+      try {
+        v.src = URL.createObjectURL(new Blob([await load(path)], { type: "video/mp4" }));
+        btn.remove();
+        v.play().catch(() => {});
+      } catch (err) { btn.textContent = "Could not load the video. Tap to try again."; busy = false; }
+    };
+    btn.addEventListener("click", start);
+    v.addEventListener("play", start);
+    v.parentNode.insertBefore(btn, v);
+  });
+}
+
+async function enter(k) {
+  key = k;
+  sizes = JSON.parse(new TextDecoder().decode(await load("_sizes.json")));
+  const start = decodeURIComponent(location.hash.slice(1)) || "index.html";
+  await show(start.endsWith(".html") ? start : "index.html", false);
+  history.replaceState({ path: current }, "", "#" + encodeURIComponent(current));
+  $("gate").hidden = true;
+  $("app").hidden = false;
+}
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("unlock").disabled = true;
+  $("unlock").textContent = "Unlocking…";
+  $("msg").textContent = "";
+  try {
+    const k = await derive($("pw").value);
+    await enter(k);
+    try { sessionStorage.setItem("kos-key", btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.exportKey("raw", k))))); } catch (_) {}
+  } catch (err) {
+    key = null;
+    $("msg").textContent = "That password didn't work. Check it and try again.";
+  }
+  $("unlock").disabled = false;
+  $("unlock").textContent = "Unlock";
+});
+$("home").addEventListener("click", () => show("index.html"));
+addEventListener("popstate", (e) => { if (key && e.state && e.state.path) show(e.state.path, false); });
+
+(async () => {  // stay unlocked when the page is reloaded in the same tab
+  try {
+    const raw = sessionStorage.getItem("kos-key");
+    if (raw) await enter(await crypto.subtle.importKey("raw", b64(raw), "AES-GCM", true, ["decrypt"]));
+  } catch (_) { key = null; $("gate").hidden = false; $("app").hidden = true; }
+})();
+</script>
+</body>
+</html>
